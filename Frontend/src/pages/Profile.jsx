@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Mail, MapPin, Calendar, UserCheck, QrCode, Upload, X } from 'lucide-react';
+import { User, Mail, MapPin, Calendar, UserCheck, QrCode, Upload, X, Trash2 } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
 const Profile = () => {
   const [profileData, setProfileData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showQRModal, setShowQRModal] = useState(false);
-  const [qrUrl, setQrUrl] = useState('');
-  const [updatingQR, setUpdatingQR] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
   const navigate = useNavigate();
 
   const formatDate = (dateString) => {
@@ -34,39 +35,99 @@ const Profile = () => {
     }
   };
 
+  const handleFileSelect = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast.error('Please select an image file');
+        return;
+      }
+
+      // Validate file size (5MB limit)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('File size must be less than 5MB');
+        return;
+      }
+
+      setSelectedFile(file);
+      
+      // Create preview URL
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+    }
+  };
+
   const handleQRUpload = async () => {
-    if (!qrUrl.trim()) {
-      toast.error('Please enter a valid QR code URL');
+    if (!selectedFile) {
+      toast.error('Please select a file to upload');
       return;
     }
 
-    setUpdatingQR(true);
+    setUploading(true);
     try {
+      const formData = new FormData();
+      formData.append('qrImage', selectedFile);
+
       const token = localStorage.getItem('token');
       const response = await fetch('http://localhost:3000/api/profile/payment-qr', {
-        method: 'PUT',
+        method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ payment_qr_url: qrUrl })
+        body: formData
       });
 
       if (response.ok) {
-        toast.success('Payment QR code updated successfully!');
-        setProfileData(prev => ({ ...prev, payment_qr_url: qrUrl }));
+        const result = await response.json();
+        toast.success('Payment QR code uploaded successfully!');
+        setProfileData(prev => ({ ...prev, payment_qr_url: result.qr_url }));
         setShowQRModal(false);
-        setQrUrl('');
+        setSelectedFile(null);
+        setPreviewUrl('');
       } else {
         const error = await response.json();
-        toast.error(error.error || 'Failed to update QR code');
+        toast.error(error.error || 'Failed to upload QR code');
       }
     } catch (error) {
-      console.error('Error updating QR code:', error);
-      toast.error('Failed to update QR code');
+      console.error('Error uploading QR code:', error);
+      toast.error('Failed to upload QR code');
     } finally {
-      setUpdatingQR(false);
+      setUploading(false);
     }
+  };
+
+  const handleDeleteQR = async () => {
+    if (!window.confirm('Are you sure you want to delete your payment QR code?')) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:3000/api/profile/payment-qr', {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        toast.success('Payment QR code deleted successfully!');
+        setProfileData(prev => ({ ...prev, payment_qr_url: null }));
+      } else {
+        const error = await response.json();
+        toast.error(error.error || 'Failed to delete QR code');
+      }
+    } catch (error) {
+      console.error('Error deleting QR code:', error);
+      toast.error('Failed to delete QR code');
+    }
+  };
+
+  const closeModal = () => {
+    setShowQRModal(false);
+    setSelectedFile(null);
+    setPreviewUrl('');
   };
 
   useEffect(() => {
@@ -104,6 +165,15 @@ const Profile = () => {
 
     fetchProfile();
   }, [navigate]);
+
+  // Cleanup preview URL on unmount
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
 
   if (loading) {
     return <div className="text-center text-green-600 mt-20 font-semibold text-lg">Loading profile...</div>;
@@ -161,15 +231,36 @@ const Profile = () => {
               Go to Dashboard
             </button>
 
-            {/* Payment QR Code Button - Only show for Sellers */}
+            {/* Payment QR Code Buttons - Only show for Sellers */}
             {profileData.role === 'Seller' && (
-              <button
-                onClick={handlePaymentQRCode}
-                className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold py-3 px-4 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-md hover:shadow-lg flex items-center justify-center"
-              >
-                <QrCode className="w-5 h-5 mr-2" />
-                {profileData.payment_qr_url ? 'View Payment QR Code' : 'Upload Payment QR Code'}
-              </button>
+              <div className="space-y-2">
+                <button
+                  onClick={handlePaymentQRCode}
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold py-3 px-4 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-md hover:shadow-lg flex items-center justify-center"
+                >
+                  <QrCode className="w-5 h-5 mr-2" />
+                  {profileData.payment_qr_url ? 'View Payment QR Code' : 'Upload Payment QR Code'}
+                </button>
+                
+                {profileData.payment_qr_url && (
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => setShowQRModal(true)}
+                      className="flex-1 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-200 flex items-center justify-center text-sm"
+                    >
+                      <Upload className="w-4 h-4 mr-2" />
+                      Update QR
+                    </button>
+                    <button
+                      onClick={handleDeleteQR}
+                      className="flex-1 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-200 flex items-center justify-center text-sm"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete QR
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
 
             <button
@@ -191,14 +282,13 @@ const Profile = () => {
       {/* QR Upload Modal */}
       {showQRModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-gray-800">Upload Payment QR Code</h2>
+              <h2 className="text-xl font-bold text-gray-800">
+                {profileData.payment_qr_url ? 'Update Payment QR Code' : 'Upload Payment QR Code'}
+              </h2>
               <button
-                onClick={() => {
-                  setShowQRModal(false);
-                  setQrUrl('');
-                }}
+                onClick={closeModal}
                 className="text-gray-500 hover:text-gray-700"
               >
                 <X className="w-6 h-6" />
@@ -208,54 +298,54 @@ const Profile = () => {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  QR Code Image URL
+                  Select QR Code Image
                 </label>
                 <input
-                  type="url"
-                  value={qrUrl}
-                  onChange={(e) => setQrUrl(e.target.value)}
-                  placeholder="https://example.com/your-qr-code.jpg"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileSelect}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Upload your QR code to an image hosting service and paste the URL here
+                  Supported formats: JPG, PNG, GIF. Maximum size: 5MB
                 </p>
               </div>
 
-              {qrUrl && (
+              {previewUrl && (
                 <div className="border rounded-lg p-4">
                   <p className="text-sm font-medium text-gray-700 mb-2">Preview:</p>
                   <img
-                    src={qrUrl}
+                    src={previewUrl}
                     alt="QR Code Preview"
-                    className="w-32 h-32 object-contain mx-auto border rounded"
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                      e.target.nextSibling.style.display = 'block';
-                    }}
+                    className="w-48 h-48 object-contain mx-auto border rounded"
                   />
-                  <div className="text-center text-red-500 text-sm hidden">
-                    Invalid image URL
-                  </div>
+                </div>
+              )}
+
+              {profileData.payment_qr_url && !previewUrl && (
+                <div className="border rounded-lg p-4">
+                  <p className="text-sm font-medium text-gray-700 mb-2">Current QR Code:</p>
+                  <img
+                    src={profileData.payment_qr_url}
+                    alt="Current QR Code"
+                    className="w-48 h-48 object-contain mx-auto border rounded"
+                  />
                 </div>
               )}
 
               <div className="flex space-x-3">
                 <button
-                  onClick={() => {
-                    setShowQRModal(false);
-                    setQrUrl('');
-                  }}
+                  onClick={closeModal}
                   className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleQRUpload}
-                  disabled={!qrUrl.trim() || updatingQR}
+                  disabled={!selectedFile || uploading}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                 >
-                  {updatingQR ? (
+                  {uploading ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                       Uploading...
@@ -263,7 +353,7 @@ const Profile = () => {
                   ) : (
                     <>
                       <Upload className="w-4 h-4 mr-2" />
-                      Upload QR Code
+                      {profileData.payment_qr_url ? 'Update QR Code' : 'Upload QR Code'}
                     </>
                   )}
                 </button>

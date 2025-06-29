@@ -5,14 +5,60 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import multer from 'multer';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import fs from 'fs';
 import { db, initializeDatabase, runQuery, getQuery, allQuery } from './database.js';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const EMISSION_FACTOR = 1.5; // kg CO₂ per kg waste
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(uploadsDir));
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename with timestamp
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'qr-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  // Accept only image files
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed!'), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  }
+});
 
 // Enhanced CORS configuration
 app.use(cors({
@@ -46,7 +92,7 @@ try {
     console.warn('⚠️ Email credentials not found in environment variables');
     console.warn('⚠️ Email verification will be skipped');
   } else {
-    transporter = nodemailer.createTransporter({
+    transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
@@ -723,33 +769,95 @@ app.get('/api/profile', async (req, res) => {
   }
 });
 
-// Update payment QR code for sellers
-app.put('/api/profile/payment-qr', authenticateToken, async (req, res) => {
-  const { payment_qr_url } = req.body;
+// Upload payment QR code for sellers
+app.post('/api/profile/payment-qr', authenticateToken, upload.single('qrImage'), async (req, res) => {
   const userId = req.user.userId;
-
-  if (!payment_qr_url) {
-    return res.status(400).json({ error: 'Payment QR URL is required' });
-  }
 
   try {
     // Check if user is a seller
-    const user = await getQuery('SELECT role FROM users WHERE id = ?', [userId]);
+    const user = await getQuery('SELECT role, payment_qr_url FROM users WHERE id = ?', [userId]);
     
     if (!user || user.role !== 'Seller') {
+      // Delete uploaded file if user is not a seller
+      if (req.file) {
+        fs.unlink(req.file.path, (err) => {
+          if (err) console.error('Error deleting file:', err);
+        });
+      }
       return res.status(403).json({ error: 'Only sellers can upload payment QR codes' });
     }
 
-    // Update payment QR URL
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // Delete old QR code file if it exists
+    if (user.payment_qr_url) {
+      const oldFilePath = path.join(__dirname, user.payment_qr_url.replace('http://localhost:3000/', ''));
+      fs.unlink(oldFilePath, (err) => {
+        if (err && err.code !== 'ENOENT') {
+          console.error('Error deleting old QR file:', err);
+        }
+      });
+    }
+
+    // Generate URL for the uploaded file
+    const qrUrl = `http://localhost:3000/uploads/${req.file.filename}`;
+
+    // Update payment QR URL in database
     await runQuery(
       'UPDATE users SET payment_qr_url = ? WHERE id = ?',
-      [payment_qr_url, userId]
+      [qrUrl, userId]
     );
 
-    res.json({ message: 'Payment QR code updated successfully' });
+    res.json({ 
+      message: 'Payment QR code uploaded successfully',
+      qr_url: qrUrl
+    });
   } catch (err) {
-    console.error('Error updating payment QR:', err);
-    res.status(500).json({ error: 'Failed to update payment QR code' });
+    // Delete uploaded file on error
+    if (req.file) {
+      fs.unlink(req.file.path, (unlinkErr) => {
+        if (unlinkErr) console.error('Error deleting file on error:', unlinkErr);
+      });
+    }
+    console.error('Error uploading payment QR:', err);
+    res.status(500).json({ error: 'Failed to upload payment QR code' });
+  }
+});
+
+// Delete payment QR code for sellers
+app.delete('/api/profile/payment-qr', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+
+  try {
+    // Check if user is a seller
+    const user = await getQuery('SELECT role, payment_qr_url FROM users WHERE id = ?', [userId]);
+    
+    if (!user || user.role !== 'Seller') {
+      return res.status(403).json({ error: 'Only sellers can delete payment QR codes' });
+    }
+
+    if (user.payment_qr_url) {
+      // Delete the file from filesystem
+      const filePath = path.join(__dirname, user.payment_qr_url.replace('http://localhost:3000/', ''));
+      fs.unlink(filePath, (err) => {
+        if (err && err.code !== 'ENOENT') {
+          console.error('Error deleting QR file:', err);
+        }
+      });
+    }
+
+    // Remove QR URL from database
+    await runQuery(
+      'UPDATE users SET payment_qr_url = NULL WHERE id = ?',
+      [userId]
+    );
+
+    res.json({ message: 'Payment QR code deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting payment QR:', err);
+    res.status(500).json({ error: 'Failed to delete payment QR code' });
   }
 });
 
@@ -1012,6 +1120,20 @@ app.get('/', (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
+  
+  // Handle multer errors
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'File too large. Maximum size is 5MB.' });
+    }
+    return res.status(400).json({ error: 'File upload error: ' + err.message });
+  }
+  
+  // Handle other file upload errors
+  if (err.message === 'Only image files are allowed!') {
+    return res.status(400).json({ error: 'Only image files are allowed!' });
+  }
+  
   res.status(500).json({ error: 'Internal server error' });
 });
 
@@ -1021,5 +1143,6 @@ app.listen(port, () => {
   console.log(`🏥 Health check available at: http://localhost:${port}/api/health`);
   console.log(`🔍 Debug users endpoint: http://localhost:${port}/api/debug/users`);
   console.log(`🏆 Leaderboard endpoint: http://localhost:${port}/api/leaderboard`);
+  console.log(`📁 File uploads directory: ${uploadsDir}`);
   console.log('💾 Using SQLite database for all data storage');
 });

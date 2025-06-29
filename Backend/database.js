@@ -21,6 +21,30 @@ const db = new sqlite3.Database(dbPath, (err) => {
 const initializeDatabase = () => {
   return new Promise((resolve, reject) => {
     db.serialize(() => {
+      // Create users table
+      db.run(`
+        CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username VARCHAR(50) UNIQUE NOT NULL,
+          full_name VARCHAR(100) NOT NULL,
+          email VARCHAR(100) UNIQUE NOT NULL,
+          gender VARCHAR(10),
+          date_of_birth DATE,
+          city VARCHAR(100),
+          role VARCHAR(20) CHECK(role IN ('Seller', 'Buyer')) NOT NULL,
+          password_hash TEXT NOT NULL,
+          verified BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `, (err) => {
+        if (err) {
+          console.error('Error creating users table:', err);
+          reject(err);
+          return;
+        }
+        console.log('Users table created/verified successfully');
+      });
+
       // Create items table
       db.run(`
         CREATE TABLE IF NOT EXISTS items (
@@ -31,7 +55,8 @@ const initializeDatabase = () => {
           weight_kg REAL NOT NULL,
           price REAL NOT NULL,
           emissions_prevented REAL NOT NULL,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (seller_id) REFERENCES users (id)
         )
       `, (err) => {
         if (err) {
@@ -52,7 +77,10 @@ const initializeDatabase = () => {
           amount_paid REAL NOT NULL,
           weight_kg REAL NOT NULL,
           status TEXT CHECK(status IN ('Pending', 'Accepted', 'Rejected')) DEFAULT 'Pending',
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (item_id) REFERENCES items (id),
+          FOREIGN KEY (buyer_id) REFERENCES users (id),
+          FOREIGN KEY (seller_id) REFERENCES users (id)
         )
       `, (err) => {
         if (err) {
@@ -64,6 +92,45 @@ const initializeDatabase = () => {
         console.log('SQLite database initialized successfully');
         resolve();
       });
+    });
+  });
+};
+
+// Helper function to run queries with promises
+const runQuery = (query, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.run(query, params, function(err) {
+      if (err) {
+        reject(err);
+      } else {
+        resolve({ id: this.lastID, changes: this.changes });
+      }
+    });
+  });
+};
+
+// Helper function to get single row
+const getQuery = (query, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.get(query, params, (err, row) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(row);
+      }
+    });
+  });
+};
+
+// Helper function to get all rows
+const allQuery = (query, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.all(query, params, (err, rows) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(rows);
+      }
     });
   });
 };
@@ -80,4 +147,4 @@ process.on('SIGINT', () => {
   });
 });
 
-export { db, initializeDatabase };
+export { db, initializeDatabase, runQuery, getQuery, allQuery };

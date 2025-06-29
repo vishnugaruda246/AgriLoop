@@ -3,6 +3,33 @@ import { useNavigate } from 'react-router-dom';
 import { Trophy, Medal, Award, Users, Leaf, TrendingUp, ArrowLeft } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
+// Helper functions moved outside component
+const getRankIcon = (rank) => {
+  switch (rank) {
+    case 1:
+      return <Trophy className="h-6 w-6 text-yellow-500" />;
+    case 2:
+      return <Medal className="h-6 w-6 text-gray-400" />;
+    case 3:
+      return <Award className="h-6 w-6 text-amber-600" />;
+    default:
+      return <span className="text-lg font-bold text-gray-600">#{rank}</span>;
+  }
+};
+
+const getRankBadgeColor = (rank) => {
+  switch (rank) {
+    case 1:
+      return 'bg-gradient-to-r from-yellow-400 to-yellow-600 text-white';
+    case 2:
+      return 'bg-gradient-to-r from-gray-300 to-gray-500 text-white';
+    case 3:
+      return 'bg-gradient-to-r from-amber-400 to-amber-600 text-white';
+    default:
+      return 'bg-gray-100 text-gray-700';
+  }
+};
+
 const Leaderboard = () => {
   const [leaderboardData, setLeaderboardData] = useState({
     topSellers: [],
@@ -39,32 +66,6 @@ const Leaderboard = () => {
       setError('Failed to load leaderboard data');
       setLoading(false);
       console.error(err);
-    }
-  };
-
-  const getRankIcon = (rank) => {
-    switch (rank) {
-      case 1:
-        return <Trophy className="h-6 w-6 text-yellow-500" />;
-      case 2:
-        return <Medal className="h-6 w-6 text-gray-400" />;
-      case 3:
-        return <Award className="h-6 w-6 text-amber-600" />;
-      default:
-        return <span className="text-lg font-bold text-gray-600">#{rank}</span>;
-    }
-  };
-
-  const getRankBadgeColor = (rank) => {
-    switch (rank) {
-      case 1:
-        return 'bg-gradient-to-r from-yellow-400 to-yellow-600 text-white';
-      case 2:
-        return 'bg-gradient-to-r from-gray-300 to-gray-500 text-white';
-      case 3:
-        return 'bg-gradient-to-r from-amber-400 to-amber-600 text-white';
-      default:
-        return 'bg-gray-100 text-gray-700';
     }
   };
 

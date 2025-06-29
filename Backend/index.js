@@ -46,7 +46,7 @@ try {
     console.warn('⚠️ Email credentials not found in environment variables');
     console.warn('⚠️ Email verification will be skipped');
   } else {
-    transporter = nodemailer.createTransporter({
+    transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
         user: process.env.EMAIL_USER,

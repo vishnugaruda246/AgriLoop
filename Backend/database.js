@@ -5,9 +5,17 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Create SQLite database connection
+// Create SQLite database connection with verbose mode for debugging
 const dbPath = join(__dirname, 'agri.db');
-const db = new sqlite3.Database(dbPath);
+console.log('SQLite database path:', dbPath);
+
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('Error opening database:', err.message);
+  } else {
+    console.log('Connected to SQLite database successfully');
+  }
+});
 
 // Initialize database tables
 const initializeDatabase = () => {
@@ -31,6 +39,7 @@ const initializeDatabase = () => {
           reject(err);
           return;
         }
+        console.log('Items table created/verified successfully');
       });
 
       // Create orders table
@@ -43,8 +52,7 @@ const initializeDatabase = () => {
           amount_paid REAL NOT NULL,
           weight_kg REAL NOT NULL,
           status TEXT CHECK(status IN ('Pending', 'Accepted', 'Rejected')) DEFAULT 'Pending',
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (item_id) REFERENCES items(id)
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `, (err) => {
         if (err) {
@@ -52,11 +60,24 @@ const initializeDatabase = () => {
           reject(err);
           return;
         }
+        console.log('Orders table created/verified successfully');
         console.log('SQLite database initialized successfully');
         resolve();
       });
     });
   });
 };
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  db.close((err) => {
+    if (err) {
+      console.error('Error closing database:', err.message);
+    } else {
+      console.log('Database connection closed.');
+    }
+    process.exit(0);
+  });
+});
 
 export { db, initializeDatabase };

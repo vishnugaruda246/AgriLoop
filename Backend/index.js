@@ -24,19 +24,29 @@ const pool = new Pool({
   },
 });
 
+// Enhanced CORS configuration
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'],
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(bodyParser.json());
 app.use(express.json());
 
-// Initialize SQLite database
-initializeDatabase().catch(console.error);
+// Initialize SQLite database with error handling
+initializeDatabase()
+  .then(() => {
+    console.log('Database initialization completed successfully');
+  })
+  .catch((error) => {
+    console.error('Database initialization failed:', error);
+    process.exit(1);
+  });
 
 // Email transporter
-const transporter = nodemailer.createTransport({
+const transporter = nodemailer.createTransporter({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
@@ -61,6 +71,15 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'AgriLoop Backend is running',
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Signup with email verification
 app.post('/api/signup', async (req, res) => {
@@ -653,20 +672,6 @@ app.delete('/api/seller/items/:id', authenticateToken, (req, res) => {
 app.get('/api/seller/orders', authenticateToken, (req, res) => {
   const sellerId = req.user.userId;
 
-  const query = `
-    SELECT 
-      o.*,
-      i.name as item_name,
-      u.full_name as buyer_name,
-      u.email as buyer_email
-    FROM orders o
-    JOIN items i ON o.item_id = i.id
-    JOIN users u ON o.buyer_id = u.id
-    WHERE o.seller_id = ?
-    ORDER BY o.created_at DESC
-  `;
-
-  // Since we need to join with PostgreSQL users table, we'll need to handle this differently
   db.all(
     'SELECT o.*, i.name as item_name FROM orders o JOIN items i ON o.item_id = i.id WHERE o.seller_id = ? ORDER BY o.created_at DESC',
     [sellerId],
@@ -680,13 +685,22 @@ app.get('/api/seller/orders', authenticateToken, (req, res) => {
       try {
         const ordersWithBuyers = await Promise.all(
           orders.map(async (order) => {
-            const userResult = await pool.query('SELECT full_name, email FROM users WHERE id = $1', [order.buyer_id]);
-            const buyer = userResult.rows[0];
-            return {
-              ...order,
-              buyer_name: buyer ? buyer.full_name : 'Unknown',
-              buyer_email: buyer ? buyer.email : 'Unknown'
-            };
+            try {
+              const userResult = await pool.query('SELECT full_name, email FROM users WHERE id = $1', [order.buyer_id]);
+              const buyer = userResult.rows[0];
+              return {
+                ...order,
+                buyer_name: buyer ? buyer.full_name : 'Unknown',
+                buyer_email: buyer ? buyer.email : 'Unknown'
+              };
+            } catch (error) {
+              console.error('Error fetching buyer details for order:', order.id, error);
+              return {
+                ...order,
+                buyer_name: 'Unknown',
+                buyer_email: 'Unknown'
+              };
+            }
           })
         );
         res.json(ordersWithBuyers);
@@ -773,13 +787,22 @@ app.get('/api/buyer/orders', authenticateToken, (req, res) => {
       try {
         const ordersWithSellers = await Promise.all(
           orders.map(async (order) => {
-            const userResult = await pool.query('SELECT full_name, email FROM users WHERE id = $1', [order.seller_id]);
-            const seller = userResult.rows[0];
-            return {
-              ...order,
-              seller_name: seller ? seller.full_name : 'Unknown',
-              seller_email: seller ? seller.email : 'Unknown'
-            };
+            try {
+              const userResult = await pool.query('SELECT full_name, email FROM users WHERE id = $1', [order.seller_id]);
+              const seller = userResult.rows[0];
+              return {
+                ...order,
+                seller_name: seller ? seller.full_name : 'Unknown',
+                seller_email: seller ? seller.email : 'Unknown'
+              };
+            } catch (error) {
+              console.error('Error fetching seller details for order:', order.id, error);
+              return {
+                ...order,
+                seller_name: 'Unknown',
+                seller_email: 'Unknown'
+              };
+            }
           })
         );
         res.json(ordersWithSellers);
@@ -797,7 +820,7 @@ app.get('/api/marketplace', authenticateToken, (req, res) => {
 
   // Get all items except those from the current buyer (if they're also a seller)
   db.all(
-    'SELECT i.*, u.full_name as seller_name, u.email as seller_email FROM items i LEFT JOIN users u ON i.seller_id = u.id WHERE i.seller_id != ? ORDER BY i.created_at DESC',
+    'SELECT * FROM items WHERE seller_id != ? ORDER BY created_at DESC',
     [buyerId],
     async (err, items) => {
       if (err) {
@@ -809,13 +832,22 @@ app.get('/api/marketplace', authenticateToken, (req, res) => {
       try {
         const itemsWithSellers = await Promise.all(
           items.map(async (item) => {
-            const userResult = await pool.query('SELECT full_name, email FROM users WHERE id = $1', [item.seller_id]);
-            const seller = userResult.rows[0];
-            return {
-              ...item,
-              seller_name: seller ? seller.full_name : 'Unknown',
-              seller_email: seller ? seller.email : 'Unknown'
-            };
+            try {
+              const userResult = await pool.query('SELECT full_name, email FROM users WHERE id = $1', [item.seller_id]);
+              const seller = userResult.rows[0];
+              return {
+                ...item,
+                seller_name: seller ? seller.full_name : 'Unknown',
+                seller_email: seller ? seller.email : 'Unknown'
+              };
+            } catch (error) {
+              console.error('Error fetching seller details for item:', item.id, error);
+              return {
+                ...item,
+                seller_name: 'Unknown',
+                seller_email: 'Unknown'
+              };
+            }
           })
         );
         res.json(itemsWithSellers);
@@ -871,7 +903,14 @@ app.post('/api/orders', authenticateToken, (req, res) => {
   });
 });
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
 // Start server
 app.listen(port, () => {
   console.log(`AgriLoop backend running on port ${port}`);
+  console.log(`Health check available at: http://localhost:${port}/api/health`);
 });

@@ -35,19 +35,38 @@ initializeDatabase()
     process.exit(1);
   });
 
-// Email transporter configuration
+// Email transporter configuration with detailed logging
 let transporter;
 try {
-  transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
-  console.log('✅ Email transporter configured successfully');
+  console.log('🔧 Configuring email transporter...');
+  console.log('📧 EMAIL_USER:', process.env.EMAIL_USER ? 'Set' : 'NOT SET');
+  console.log('🔑 EMAIL_PASS:', process.env.EMAIL_PASS ? 'Set' : 'NOT SET');
+  
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.warn('⚠️ Email credentials not found in environment variables');
+    console.warn('⚠️ Email verification will be skipped');
+  } else {
+    transporter = nodemailer.createTransporter({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+    
+    // Test the email connection
+    transporter.verify((error, success) => {
+      if (error) {
+        console.error('❌ Email transporter verification failed:', error);
+        transporter = null;
+      } else {
+        console.log('✅ Email transporter configured and verified successfully');
+      }
+    });
+  }
 } catch (error) {
   console.error('❌ Email transporter configuration failed:', error);
+  transporter = null;
 }
 
 // Authentication middleware
@@ -76,6 +95,21 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     database: 'SQLite'
   });
+});
+
+// Debug endpoint to check users table
+app.get('/api/debug/users', async (req, res) => {
+  try {
+    const users = await allQuery('SELECT id, username, email, verified, created_at FROM users');
+    res.json({
+      message: 'Users table contents',
+      count: users.length,
+      users: users
+    });
+  } catch (err) {
+    console.error('Error fetching users:', err);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
 });
 
 // Signup with email verification
@@ -160,10 +194,10 @@ app.post('/api/signup', async (req, res) => {
     // Send verification email if transporter is available
     if (transporter) {
       try {
-        console.log('📧 Sending verification email...');
+        console.log('📧 Attempting to send verification email to:', email);
         const verificationLink = `http://localhost:3000/api/verify-email?token=${token}`;
 
-        await transporter.sendMail({
+        const mailOptions = {
           from: process.env.EMAIL_USER,
           to: email,
           subject: 'Verify your email - AgriLoop',
@@ -182,29 +216,66 @@ app.post('/api/signup', async (req, res) => {
               <p>If you didn't create this account, please ignore this email.</p>
             </div>
           `
+        };
+
+        console.log('📤 Sending email with options:', {
+          from: mailOptions.from,
+          to: mailOptions.to,
+          subject: mailOptions.subject
         });
-        console.log('✅ Verification email sent successfully');
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log('✅ Verification email sent successfully!');
+        console.log('📧 Email info:', {
+          messageId: info.messageId,
+          response: info.response,
+          accepted: info.accepted,
+          rejected: info.rejected
+        });
       } catch (emailError) {
-        console.error('❌ Failed to send verification email:', emailError);
-        // Don't fail the signup if email fails
+        console.error('❌ Failed to send verification email:');
+        console.error('📧 Email error details:', emailError);
+        console.error('📧 Error message:', emailError.message);
+        console.error('📧 Error code:', emailError.code);
+        
+        // Log specific Gmail/SMTP errors
+        if (emailError.code === 'EAUTH') {
+          console.error('🔐 Authentication failed - check EMAIL_USER and EMAIL_PASS');
+        } else if (emailError.code === 'ECONNECTION') {
+          console.error('🌐 Connection failed - check internet connection');
+        } else if (emailError.responseCode === 535) {
+          console.error('🔑 Invalid credentials - check Gmail app password');
+        }
+        
+        // Don't fail the signup if email fails, but log it
+        console.log('⚠️ Continuing with signup despite email failure');
       }
     } else {
       console.log('⚠️ Email transporter not available, skipping email verification');
+      console.log('🔧 To enable email verification:');
+      console.log('   1. Set EMAIL_USER in .env file');
+      console.log('   2. Set EMAIL_PASS in .env file (use Gmail App Password)');
+      console.log('   3. Restart the server');
     }
 
     res.status(200).json({ 
-      message: 'Signup successful. Check your email to verify your account.',
+      message: transporter ? 
+        'Signup successful. Check your email to verify your account.' :
+        'Signup successful. Email verification is currently disabled.',
       user: {
         id: result.id,
         username,
         full_name,
         email,
         role
-      }
+      },
+      emailSent: !!transporter
     });
 
   } catch (err) {
     console.error('❌ Signup error:', err);
+    console.error('❌ Error details:', err.message);
+    console.error('❌ Error stack:', err.stack);
     res.status(500).json({ error: 'Error during signup. Please try again.' });
   }
 });
@@ -850,5 +921,6 @@ app.use((err, req, res, next) => {
 app.listen(port, () => {
   console.log(`🚀 AgriLoop backend running on port ${port}`);
   console.log(`🏥 Health check available at: http://localhost:${port}/api/health`);
+  console.log(`🔍 Debug users endpoint: http://localhost:${port}/api/debug/users`);
   console.log('💾 Using SQLite database for all data storage');
 });

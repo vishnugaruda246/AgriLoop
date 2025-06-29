@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
-import { ShoppingCart, Leaf, User, MapPin, Calendar } from 'lucide-react';
+import { ShoppingCart, Leaf, User, MapPin, Calendar, QrCode, X } from 'lucide-react';
 
 const Marketplace = () => {
   const [items, setItems] = useState([]);
@@ -9,6 +9,8 @@ const Marketplace = () => {
   const [error, setError] = useState('');
   const [selectedWasteType, setSelectedWasteType] = useState('');
   const [sortBy, setSortBy] = useState('newest');
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [selectedItem, setSelectedItem] = useState(null);
 
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
@@ -50,8 +52,13 @@ const Marketplace = () => {
     }
   };
 
-  const handlePurchase = async (itemId) => {
-    if (!window.confirm('Are you sure you want to purchase this item?')) return;
+  const handlePurchaseClick = (item) => {
+    setSelectedItem(item);
+    setShowPurchaseModal(true);
+  };
+
+  const handleConfirmPurchase = async () => {
+    if (!selectedItem) return;
 
     try {
       const response = await fetch('http://localhost:3000/api/orders', {
@@ -60,12 +67,14 @@ const Marketplace = () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ item_id: itemId })
+        body: JSON.stringify({ item_id: selectedItem.id })
       });
 
       if (!response.ok) throw new Error('Failed to create order');
 
       toast.success('Order placed successfully! The seller will review your request.');
+      setShowPurchaseModal(false);
+      setSelectedItem(null);
       // Optionally refresh the items or navigate to orders page
       navigate('/dashboard/buyer');
     } catch (err) {
@@ -225,7 +234,7 @@ const Marketplace = () => {
                   </div>
 
                   <button
-                    onClick={() => handlePurchase(item.id)}
+                    onClick={() => handlePurchaseClick(item)}
                     className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center"
                   >
                     <ShoppingCart className="h-4 w-4 mr-2" />
@@ -237,6 +246,123 @@ const Marketplace = () => {
           </div>
         )}
       </div>
+
+      {/* Purchase Confirmation Modal */}
+      {showPurchaseModal && selectedItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-gray-800">Confirm Purchase</h2>
+              <button
+                onClick={() => {
+                  setShowPurchaseModal(false);
+                  setSelectedItem(null);
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              {/* Item Details */}
+              <div className="border rounded-lg p-4 bg-gray-50">
+                <h3 className="font-semibold text-gray-800 mb-2">{selectedItem.name}</h3>
+                <div className="space-y-2 text-sm text-gray-600">
+                  <div className="flex justify-between">
+                    <span>Type:</span>
+                    <span className="font-medium">{selectedItem.waste_type}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Weight:</span>
+                    <span className="font-medium">{selectedItem.weight_kg} kg</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Price:</span>
+                    <span className="font-medium text-green-600">₹{selectedItem.price}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>CO₂ Prevented:</span>
+                    <span className="font-medium">{Math.round(selectedItem.emissions_prevented)} kg</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Seller:</span>
+                    <span className="font-medium">{selectedItem.seller_name}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment QR Code */}
+              {selectedItem.payment_qr_url && (
+                <div className="border rounded-lg p-4">
+                  <div className="flex items-center mb-3">
+                    <QrCode className="w-5 h-5 text-blue-600 mr-2" />
+                    <h4 className="font-semibold text-gray-800">Payment QR Code</h4>
+                  </div>
+                  <div className="text-center">
+                    <img
+                      src={selectedItem.payment_qr_url}
+                      alt="Payment QR Code"
+                      className="w-48 h-48 object-contain mx-auto border rounded-lg"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                        e.target.nextSibling.style.display = 'block';
+                      }}
+                    />
+                    <div className="text-center text-red-500 text-sm hidden mt-2">
+                      QR Code could not be loaded
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Scan this QR code to make payment to the seller
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {!selectedItem.payment_qr_url && (
+                <div className="border rounded-lg p-4 bg-yellow-50 border-yellow-200">
+                  <div className="flex items-center mb-2">
+                    <QrCode className="w-5 h-5 text-yellow-600 mr-2" />
+                    <h4 className="font-semibold text-yellow-800">Payment Information</h4>
+                  </div>
+                  <p className="text-sm text-yellow-700">
+                    The seller hasn't uploaded a payment QR code yet. You can still place the order and coordinate payment details directly with the seller.
+                  </p>
+                </div>
+              )}
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h4 className="font-semibold text-blue-800 mb-2">Order Process:</h4>
+                <ol className="text-sm text-blue-700 space-y-1">
+                  <li>1. Click "Confirm Purchase" to place your order</li>
+                  <li>2. {selectedItem.payment_qr_url ? 'Make payment using the QR code above' : 'Contact seller for payment details'}</li>
+                  <li>3. Seller will review and accept/reject your order</li>
+                  <li>4. Coordinate pickup/delivery with the seller</li>
+                </ol>
+              </div>
+
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => {
+                    setShowPurchaseModal(false);
+                    setSelectedItem(null);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmPurchase}
+                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center"
+                >
+                  <ShoppingCart className="w-4 h-4 mr-2" />
+                  Confirm Purchase
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

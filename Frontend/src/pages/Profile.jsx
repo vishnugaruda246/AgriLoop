@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Mail, MapPin, Calendar, UserCheck, QrCode } from 'lucide-react';
+import { User, Mail, MapPin, Calendar, UserCheck, QrCode, Upload, X } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
 const Profile = () => {
   const [profileData, setProfileData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [qrUrl, setQrUrl] = useState('');
+  const [updatingQR, setUpdatingQR] = useState(false);
   const navigate = useNavigate();
-
-  // Payment QR code image URL - you can replace this with your actual QR code image
-  const paymentQRCodeURL = "https://drive.google.com/file/d/1xlmot2btBO8e4IYrQq4PnJlBoK-ObP26/view?usp=drivesdk";
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
@@ -25,8 +25,48 @@ const Profile = () => {
   };
 
   const handlePaymentQRCode = () => {
-    // Open QR code image in a new tab
-    window.open(paymentQRCodeURL, '_blank');
+    if (profileData.payment_qr_url) {
+      // Open existing QR code image in a new tab
+      window.open(profileData.payment_qr_url, '_blank');
+    } else {
+      // Show modal to upload QR code
+      setShowQRModal(true);
+    }
+  };
+
+  const handleQRUpload = async () => {
+    if (!qrUrl.trim()) {
+      toast.error('Please enter a valid QR code URL');
+      return;
+    }
+
+    setUpdatingQR(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:3000/api/profile/payment-qr', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ payment_qr_url: qrUrl })
+      });
+
+      if (response.ok) {
+        toast.success('Payment QR code updated successfully!');
+        setProfileData(prev => ({ ...prev, payment_qr_url: qrUrl }));
+        setShowQRModal(false);
+        setQrUrl('');
+      } else {
+        const error = await response.json();
+        toast.error(error.error || 'Failed to update QR code');
+      }
+    } catch (error) {
+      console.error('Error updating QR code:', error);
+      toast.error('Failed to update QR code');
+    } finally {
+      setUpdatingQR(false);
+    }
   };
 
   useEffect(() => {
@@ -128,7 +168,7 @@ const Profile = () => {
                 className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold py-3 px-4 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-md hover:shadow-lg flex items-center justify-center"
               >
                 <QrCode className="w-5 h-5 mr-2" />
-                Payment QR Code
+                {profileData.payment_qr_url ? 'View Payment QR Code' : 'Upload Payment QR Code'}
               </button>
             )}
 
@@ -147,6 +187,92 @@ const Profile = () => {
           </p>
         </div>
       </div>
+
+      {/* QR Upload Modal */}
+      {showQRModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-gray-800">Upload Payment QR Code</h2>
+              <button
+                onClick={() => {
+                  setShowQRModal(false);
+                  setQrUrl('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  QR Code Image URL
+                </label>
+                <input
+                  type="url"
+                  value={qrUrl}
+                  onChange={(e) => setQrUrl(e.target.value)}
+                  placeholder="https://example.com/your-qr-code.jpg"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Upload your QR code to an image hosting service and paste the URL here
+                </p>
+              </div>
+
+              {qrUrl && (
+                <div className="border rounded-lg p-4">
+                  <p className="text-sm font-medium text-gray-700 mb-2">Preview:</p>
+                  <img
+                    src={qrUrl}
+                    alt="QR Code Preview"
+                    className="w-32 h-32 object-contain mx-auto border rounded"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.nextSibling.style.display = 'block';
+                    }}
+                  />
+                  <div className="text-center text-red-500 text-sm hidden">
+                    Invalid image URL
+                  </div>
+                </div>
+              )}
+
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => {
+                    setShowQRModal(false);
+                    setQrUrl('');
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleQRUpload}
+                  disabled={!qrUrl.trim() || updatingQR}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                >
+                  {updatingQR ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Upload QR Code
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Toaster />
     </div>
   );

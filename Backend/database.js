@@ -45,6 +45,7 @@ const initializeDatabase = () => {
           role VARCHAR(20) CHECK(role IN ('Seller', 'Buyer')) NOT NULL,
           password_hash TEXT NOT NULL,
           verified BOOLEAN DEFAULT 0,
+          payment_qr_url TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `, (err) => {
@@ -54,6 +55,18 @@ const initializeDatabase = () => {
           return;
         }
         console.log('Users table created/verified successfully');
+      });
+
+      // Add payment_qr_url column if it doesn't exist
+      db.run(`
+        ALTER TABLE users ADD COLUMN payment_qr_url TEXT
+      `, (err) => {
+        // Ignore error if column already exists
+        if (err && !err.message.includes('duplicate column name')) {
+          console.error('Error adding payment_qr_url column:', err);
+        } else {
+          console.log('Payment QR URL column added/verified successfully');
+        }
       });
 
       // Create items table

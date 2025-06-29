@@ -46,7 +46,7 @@ try {
     console.warn('⚠️ Email credentials not found in environment variables');
     console.warn('⚠️ Email verification will be skipped');
   } else {
-    transporter = nodemailer.createTransport({
+    transporter = nodemailer.createTransporter({
       service: 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
@@ -710,7 +710,7 @@ app.get('/api/profile', async (req, res) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
     const user = await getQuery(
-      'SELECT username, full_name, email, gender, date_of_birth, city, role FROM users WHERE id = ?', 
+      'SELECT username, full_name, email, gender, date_of_birth, city, role, payment_qr_url FROM users WHERE id = ?', 
       [decoded.userId]
     );
 
@@ -720,6 +720,36 @@ app.get('/api/profile', async (req, res) => {
   } catch (err) {
     console.error('Token verification error:', err);
     res.status(403).json({ message: 'Invalid token' });
+  }
+});
+
+// Update payment QR code for sellers
+app.put('/api/profile/payment-qr', authenticateToken, async (req, res) => {
+  const { payment_qr_url } = req.body;
+  const userId = req.user.userId;
+
+  if (!payment_qr_url) {
+    return res.status(400).json({ error: 'Payment QR URL is required' });
+  }
+
+  try {
+    // Check if user is a seller
+    const user = await getQuery('SELECT role FROM users WHERE id = ?', [userId]);
+    
+    if (!user || user.role !== 'Seller') {
+      return res.status(403).json({ error: 'Only sellers can upload payment QR codes' });
+    }
+
+    // Update payment QR URL
+    await runQuery(
+      'UPDATE users SET payment_qr_url = ? WHERE id = ?',
+      [payment_qr_url, userId]
+    );
+
+    res.json({ message: 'Payment QR code updated successfully' });
+  } catch (err) {
+    console.error('Error updating payment QR:', err);
+    res.status(500).json({ error: 'Failed to update payment QR code' });
   }
 });
 
@@ -922,13 +952,13 @@ app.get('/api/buyer/orders', authenticateToken, async (req, res) => {
   }
 });
 
-// Get marketplace items
+// Get marketplace items with seller QR codes
 app.get('/api/marketplace', authenticateToken, async (req, res) => {
   const buyerId = req.user.userId;
 
   try {
     const items = await allQuery(`
-      SELECT i.*, u.full_name as seller_name, u.email as seller_email
+      SELECT i.*, u.full_name as seller_name, u.email as seller_email, u.payment_qr_url
       FROM items i 
       JOIN users u ON i.seller_id = u.id
       WHERE i.seller_id != ? 

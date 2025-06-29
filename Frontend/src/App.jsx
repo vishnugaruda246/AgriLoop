@@ -7,6 +7,7 @@ import ImpactCalculator from './pages/ImpactCalculator';
 import Profile from './pages/Profile';
 import SellerDashboard from './pages/SellerDashboard';
 import BuyerDashboard from './pages/BuyerDashboard';
+import Marketplace from './pages/Marketplace';
 import PrivateRoute from './lib/PrivateRoute';
 
 const App = () => {
@@ -23,6 +24,10 @@ const App = () => {
         <Route path="/signup" element={<Signup />} />
         <Route path="/login" element={<Login />} />
         <Route path="/profile" element={<Profile/>} />
+        <Route path="/dashboard/seller" element={<SellerDashboard/>} />
+        <Route path="/dashboard/buyer" element={<BuyerDashboard/>} />
+        <Route path="/marketplace" element={<Marketplace/>} />
+        {/* Legacy routes for backward compatibility */}
         <Route path="/seller" element={<SellerDashboard/>} />
         <Route path="/buyer" element={<BuyerDashboard/>} />
       </Routes>

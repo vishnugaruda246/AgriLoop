@@ -3,8 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { User, Mail, MapPin, Calendar, UserCheck } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
-
-
 const Profile = () => {
   const [profileData, setProfileData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -104,9 +102,9 @@ const handleLogout = () => {
             <button onClick={() => {
       const role = localStorage.getItem('userRole');
       if (role === 'Seller') {
-        navigate('/seller');
+        navigate('/dashboard/seller');
       } else if (role === 'Buyer') {
-        navigate('/buyer');
+        navigate('/dashboard/buyer');
       } else {
         toast.error('User role not found. Please login again.');
         navigate('/login');

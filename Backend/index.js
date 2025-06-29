@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import { db, initializeDatabase } from './database.js';
 
 const { Pool } = pkg;
 dotenv.config();
@@ -23,17 +24,19 @@ const pool = new Pool({
   },
 });
 
-
 app.use(cors({
   origin: 'http://localhost:5173',
-  credentials: true, // if you're using cookies or authorization headers
+  credentials: true,
 }));
 
 app.use(bodyParser.json());
-app.use(express.json())
+app.use(express.json());
+
+// Initialize SQLite database
+initializeDatabase().catch(console.error);
 
 // Email transporter
-const transporter = nodemailer.createTransport({
+const transporter = nodemailer.createTransporter({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
@@ -115,7 +118,6 @@ app.post('/api/signup', async (req, res) => {
     );
 
     const verificationLink = `http://localhost:3000/api/verify-email?token=${token}`;
-
 
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
@@ -467,7 +469,6 @@ app.get('/api/verify-email', async (req, res) => {
   }
 });
 
-
 // Login endpoint
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
@@ -537,11 +538,337 @@ app.get('/api/profile', async (req, res) => {
   }
 });
 
-
-
-
 app.post('/api/logout', (req, res) => {
   return res.status(200).json({ message: 'Logged out successfully' });
+});
+
+// ==================== SELLER ENDPOINTS ====================
+
+// Get seller dashboard KPIs
+app.get('/api/seller/dashboard', authenticateToken, (req, res) => {
+  const sellerId = req.user.userId;
+
+  const query = `
+    SELECT 
+      COALESCE(SUM(amount_paid), 0) as totalAmountSold,
+      COALESCE(SUM(weight_kg), 0) as totalWeightSold,
+      COALESCE(SUM(weight_kg * 0.85), 0) as totalEmissionsPrevented,
+      COUNT(*) as totalTransactions,
+      COUNT(CASE WHEN status = 'Pending' THEN 1 END) as pendingOrders,
+      COUNT(CASE WHEN status = 'Accepted' THEN 1 END) as completedOrders
+    FROM orders 
+    WHERE seller_id = ?
+  `;
+
+  db.get(query, [sellerId], (err, row) => {
+    if (err) {
+      console.error('Error fetching seller dashboard:', err);
+      return res.status(500).json({ error: 'Failed to fetch dashboard data' });
+    }
+    res.json(row || {
+      totalAmountSold: 0,
+      totalWeightSold: 0,
+      totalEmissionsPrevented: 0,
+      totalTransactions: 0,
+      pendingOrders: 0,
+      completedOrders: 0
+    });
+  });
+});
+
+// Get seller items
+app.get('/api/seller/items', authenticateToken, (req, res) => {
+  const sellerId = req.user.userId;
+
+  db.all(
+    'SELECT * FROM items WHERE seller_id = ? ORDER BY created_at DESC',
+    [sellerId],
+    (err, rows) => {
+      if (err) {
+        console.error('Error fetching seller items:', err);
+        return res.status(500).json({ error: 'Failed to fetch items' });
+      }
+      res.json(rows || []);
+    }
+  );
+});
+
+// Add new item
+app.post('/api/items', authenticateToken, (req, res) => {
+  const { name, waste_type, weight_kg, price } = req.body;
+  const sellerId = req.user.userId;
+
+  if (!name || !waste_type || !weight_kg || !price) {
+    return res.status(400).json({ error: 'All fields are required' });
+  }
+
+  const emissions_prevented = weight_kg * 0.85;
+
+  const query = `
+    INSERT INTO items (seller_id, name, waste_type, weight_kg, price, emissions_prevented)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `;
+
+  db.run(query, [sellerId, name, waste_type, weight_kg, price, emissions_prevented], function(err) {
+    if (err) {
+      console.error('Error adding item:', err);
+      return res.status(500).json({ error: 'Failed to add item' });
+    }
+
+    // Return the created item
+    db.get('SELECT * FROM items WHERE id = ?', [this.lastID], (err, row) => {
+      if (err) {
+        console.error('Error fetching created item:', err);
+        return res.status(500).json({ error: 'Item created but failed to fetch' });
+      }
+      res.status(201).json(row);
+    });
+  });
+});
+
+// Delete item
+app.delete('/api/seller/items/:id', authenticateToken, (req, res) => {
+  const itemId = req.params.id;
+  const sellerId = req.user.userId;
+
+  db.run(
+    'DELETE FROM items WHERE id = ? AND seller_id = ?',
+    [itemId, sellerId],
+    function(err) {
+      if (err) {
+        console.error('Error deleting item:', err);
+        return res.status(500).json({ error: 'Failed to delete item' });
+      }
+      
+      if (this.changes === 0) {
+        return res.status(404).json({ error: 'Item not found or not authorized' });
+      }
+      
+      res.json({ message: 'Item deleted successfully' });
+    }
+  );
+});
+
+// Get seller orders
+app.get('/api/seller/orders', authenticateToken, (req, res) => {
+  const sellerId = req.user.userId;
+
+  const query = `
+    SELECT 
+      o.*,
+      i.name as item_name,
+      u.full_name as buyer_name,
+      u.email as buyer_email
+    FROM orders o
+    JOIN items i ON o.item_id = i.id
+    JOIN users u ON o.buyer_id = u.id
+    WHERE o.seller_id = ?
+    ORDER BY o.created_at DESC
+  `;
+
+  // Since we need to join with PostgreSQL users table, we'll need to handle this differently
+  db.all(
+    'SELECT o.*, i.name as item_name FROM orders o JOIN items i ON o.item_id = i.id WHERE o.seller_id = ? ORDER BY o.created_at DESC',
+    [sellerId],
+    async (err, orders) => {
+      if (err) {
+        console.error('Error fetching seller orders:', err);
+        return res.status(500).json({ error: 'Failed to fetch orders' });
+      }
+
+      // Fetch buyer details from PostgreSQL for each order
+      try {
+        const ordersWithBuyers = await Promise.all(
+          orders.map(async (order) => {
+            const userResult = await pool.query('SELECT full_name, email FROM users WHERE id = $1', [order.buyer_id]);
+            const buyer = userResult.rows[0];
+            return {
+              ...order,
+              buyer_name: buyer ? buyer.full_name : 'Unknown',
+              buyer_email: buyer ? buyer.email : 'Unknown'
+            };
+          })
+        );
+        res.json(ordersWithBuyers);
+      } catch (error) {
+        console.error('Error fetching buyer details:', error);
+        res.json(orders.map(order => ({ ...order, buyer_name: 'Unknown', buyer_email: 'Unknown' })));
+      }
+    }
+  );
+});
+
+// Update order status
+app.patch('/api/seller/orders/:id/status', authenticateToken, (req, res) => {
+  const orderId = req.params.id;
+  const { status } = req.body;
+  const sellerId = req.user.userId;
+
+  if (!['Accepted', 'Rejected'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+
+  db.run(
+    'UPDATE orders SET status = ? WHERE id = ? AND seller_id = ?',
+    [status, orderId, sellerId],
+    function(err) {
+      if (err) {
+        console.error('Error updating order status:', err);
+        return res.status(500).json({ error: 'Failed to update order status' });
+      }
+      
+      if (this.changes === 0) {
+        return res.status(404).json({ error: 'Order not found or not authorized' });
+      }
+      
+      res.json({ message: 'Order status updated successfully' });
+    }
+  );
+});
+
+// ==================== BUYER ENDPOINTS ====================
+
+// Get buyer dashboard KPIs
+app.get('/api/buyer/dashboard', authenticateToken, (req, res) => {
+  const buyerId = req.user.userId;
+
+  const query = `
+    SELECT 
+      COALESCE(SUM(amount_paid), 0) as totalAmountSpent,
+      COALESCE(SUM(weight_kg), 0) as totalWeightPurchased,
+      COALESCE(SUM(weight_kg * 0.85), 0) as totalEmissionsOffset,
+      COUNT(*) as totalTransactions
+    FROM orders 
+    WHERE buyer_id = ?
+  `;
+
+  db.get(query, [buyerId], (err, row) => {
+    if (err) {
+      console.error('Error fetching buyer dashboard:', err);
+      return res.status(500).json({ error: 'Failed to fetch dashboard data' });
+    }
+    res.json(row || {
+      totalAmountSpent: 0,
+      totalWeightPurchased: 0,
+      totalEmissionsOffset: 0,
+      totalTransactions: 0
+    });
+  });
+});
+
+// Get buyer orders
+app.get('/api/buyer/orders', authenticateToken, (req, res) => {
+  const buyerId = req.user.userId;
+
+  db.all(
+    'SELECT o.*, i.name as item_name FROM orders o JOIN items i ON o.item_id = i.id WHERE o.buyer_id = ? ORDER BY o.created_at DESC',
+    [buyerId],
+    async (err, orders) => {
+      if (err) {
+        console.error('Error fetching buyer orders:', err);
+        return res.status(500).json({ error: 'Failed to fetch orders' });
+      }
+
+      // Fetch seller details from PostgreSQL for each order
+      try {
+        const ordersWithSellers = await Promise.all(
+          orders.map(async (order) => {
+            const userResult = await pool.query('SELECT full_name, email FROM users WHERE id = $1', [order.seller_id]);
+            const seller = userResult.rows[0];
+            return {
+              ...order,
+              seller_name: seller ? seller.full_name : 'Unknown',
+              seller_email: seller ? seller.email : 'Unknown'
+            };
+          })
+        );
+        res.json(ordersWithSellers);
+      } catch (error) {
+        console.error('Error fetching seller details:', error);
+        res.json(orders.map(order => ({ ...order, seller_name: 'Unknown', seller_email: 'Unknown' })));
+      }
+    }
+  );
+});
+
+// Get marketplace items
+app.get('/api/marketplace', authenticateToken, (req, res) => {
+  const buyerId = req.user.userId;
+
+  // Get all items except those from the current buyer (if they're also a seller)
+  db.all(
+    'SELECT i.*, u.full_name as seller_name, u.email as seller_email FROM items i LEFT JOIN users u ON i.seller_id = u.id WHERE i.seller_id != ? ORDER BY i.created_at DESC',
+    [buyerId],
+    async (err, items) => {
+      if (err) {
+        console.error('Error fetching marketplace items:', err);
+        return res.status(500).json({ error: 'Failed to fetch marketplace items' });
+      }
+
+      // Fetch seller details from PostgreSQL for each item
+      try {
+        const itemsWithSellers = await Promise.all(
+          items.map(async (item) => {
+            const userResult = await pool.query('SELECT full_name, email FROM users WHERE id = $1', [item.seller_id]);
+            const seller = userResult.rows[0];
+            return {
+              ...item,
+              seller_name: seller ? seller.full_name : 'Unknown',
+              seller_email: seller ? seller.email : 'Unknown'
+            };
+          })
+        );
+        res.json(itemsWithSellers);
+      } catch (error) {
+        console.error('Error fetching seller details:', error);
+        res.json(items.map(item => ({ ...item, seller_name: 'Unknown', seller_email: 'Unknown' })));
+      }
+    }
+  );
+});
+
+// Create order
+app.post('/api/orders', authenticateToken, (req, res) => {
+  const { item_id } = req.body;
+  const buyerId = req.user.userId;
+
+  if (!item_id) {
+    return res.status(400).json({ error: 'Item ID is required' });
+  }
+
+  // First, get the item details
+  db.get('SELECT * FROM items WHERE id = ?', [item_id], (err, item) => {
+    if (err) {
+      console.error('Error fetching item:', err);
+      return res.status(500).json({ error: 'Failed to fetch item' });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    // Create the order
+    const query = `
+      INSERT INTO orders (item_id, buyer_id, seller_id, amount_paid, weight_kg, status)
+      VALUES (?, ?, ?, ?, ?, 'Pending')
+    `;
+
+    db.run(query, [item_id, buyerId, item.seller_id, item.price, item.weight_kg], function(err) {
+      if (err) {
+        console.error('Error creating order:', err);
+        return res.status(500).json({ error: 'Failed to create order' });
+      }
+
+      // Return the created order
+      db.get('SELECT * FROM orders WHERE id = ?', [this.lastID], (err, order) => {
+        if (err) {
+          console.error('Error fetching created order:', err);
+          return res.status(500).json({ error: 'Order created but failed to fetch' });
+        }
+        res.status(201).json(order);
+      });
+    });
+  });
 });
 
 // Start server

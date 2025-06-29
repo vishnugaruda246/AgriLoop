@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import toast, { Toaster } from 'react-hot-toast';
 
 const SellerDashboard = () => {
   const [kpis, setKpis] = useState({
     totalAmountSold: 0,
     totalWeightSold: 0,
     totalEmissionsPrevented: 0,
-    totalOrders: 0,
+    totalTransactions: 0,
     pendingOrders: 0,
     completedOrders: 0
   });
@@ -24,10 +26,7 @@ const SellerDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const navigate = (path) => {
-    // Navigation would be handled by your routing system
-    console.log(`Navigate to: ${path}`);
-  };
+  const navigate = useNavigate();
   const token = localStorage.getItem('token');
 
   const wasteTypes = [
@@ -41,10 +40,14 @@ const SellerDashboard = () => {
   ];
 
   useEffect(() => {
+    if (!token) {
+      navigate('/login');
+      return;
+    }
     fetchDashboardData();
     fetchItems();
     fetchOrders();
-  }, [token]);
+  }, [token, navigate]);
 
   const fetchDashboardData = async () => {
     try {
@@ -98,12 +101,12 @@ const SellerDashboard = () => {
 
   const handleAddItem = async () => {
     if (!newItem.name || !newItem.waste_type || !newItem.weight_kg || !newItem.price) {
-      setError('Please fill in all fields');
+      toast.error('Please fill in all fields');
       return;
     }
 
     try {
-      const response = await fetch('http://localhost:3000/api/seller/items', {
+      const response = await fetch('http://localhost:3000/api/items', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -124,8 +127,9 @@ const SellerDashboard = () => {
       setShowModal(false);
       setNewItem({ name: '', waste_type: '', weight_kg: '', price: '' });
       setError('');
+      toast.success('Item added successfully!');
     } catch (err) {
-      setError('Failed to add item');
+      toast.error('Failed to add item');
       console.error(err);
     }
   };
@@ -133,7 +137,7 @@ const SellerDashboard = () => {
   const handleUpdateOrderStatus = async (orderId, status) => {
     try {
       const response = await fetch(`http://localhost:3000/api/seller/orders/${orderId}/status`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
@@ -148,8 +152,9 @@ const SellerDashboard = () => {
       await fetchDashboardData();
       setShowOrderModal(false);
       setSelectedOrder(null);
+      toast.success(`Order ${status.toLowerCase()} successfully!`);
     } catch (err) {
-      setError('Failed to update order status');
+      toast.error('Failed to update order status');
       console.error(err);
     }
   };
@@ -166,20 +171,24 @@ const SellerDashboard = () => {
       if (!response.ok) throw new Error('Failed to delete item');
 
       setItems(prev => prev.filter(item => item.id !== itemId));
+      toast.success('Item deleted successfully!');
     } catch (err) {
-      setError('Failed to delete item');
+      toast.error('Failed to delete item');
       console.error(err);
     }
   };
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'pending': return 'text-yellow-600 bg-yellow-100';
-      case 'completed': return 'text-green-600 bg-green-100';
-      case 'cancelled': return 'text-red-600 bg-red-100';
+      case 'Pending': return 'text-yellow-600 bg-yellow-100';
+      case 'Accepted': return 'text-green-600 bg-green-100';
+      case 'Rejected': return 'text-red-600 bg-red-100';
       default: return 'text-gray-600 bg-gray-100';
     }
   };
+
+  const pendingOrders = orders.filter(order => order.status === 'Pending');
+  const previousOrders = orders.filter(order => order.status !== 'Pending');
 
   if (loading) {
     return (
@@ -194,8 +203,10 @@ const SellerDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
+      <Toaster position="top-right" />
+      
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-green-700">AgriLoop Seller</h1>
+        <h1 className="text-3xl font-bold text-green-700">AgriLoop Seller Dashboard</h1>
         <div className="flex space-x-3">
           <button 
             onClick={() => navigate('/profile')} 
@@ -205,7 +216,7 @@ const SellerDashboard = () => {
           </button>
           <button 
             onClick={() => {
-              localStorage.removeItem('token');
+              localStorage.clear();
               navigate('/login');
             }} 
             className="text-sm text-gray-600 bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg"
@@ -226,8 +237,8 @@ const SellerDashboard = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
         <KpiCard title="Total Revenue" value={`₹${kpis.totalAmountSold?.toLocaleString() || 0}`} />
         <KpiCard title="Total Weight Sold" value={`${kpis.totalWeightSold || 0} kg`} />
-        <KpiCard title="CO₂ Prevented" value={`${kpis.totalEmissionsPrevented || 0} kg`} />
-        <KpiCard title="Total Orders" value={kpis.totalOrders || 0} />
+        <KpiCard title="CO₂ Prevented" value={`${Math.round(kpis.totalEmissionsPrevented || 0)} kg`} />
+        <KpiCard title="Total Orders" value={kpis.totalTransactions || 0} />
         <KpiCard title="Pending Orders" value={kpis.pendingOrders || 0} color="yellow" />
         <KpiCard title="Completed Orders" value={kpis.completedOrders || 0} color="green" />
       </div>
@@ -241,7 +252,7 @@ const SellerDashboard = () => {
               onClick={() => setShowModal(true)} 
               className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center"
             >
-              + Add New Item
+              + Add Item for Sale
             </button>
           </div>
         </div>
@@ -254,6 +265,7 @@ const SellerDashboard = () => {
                 <th className="text-left p-4 font-semibold">Waste Type</th>
                 <th className="text-left p-4 font-semibold">Weight (kg)</th>
                 <th className="text-left p-4 font-semibold">Price (₹)</th>
+                <th className="text-left p-4 font-semibold">CO₂ Prevented (kg)</th>
                 <th className="text-left p-4 font-semibold">Listed Date</th>
                 <th className="text-left p-4 font-semibold">Actions</th>
               </tr>
@@ -261,7 +273,7 @@ const SellerDashboard = () => {
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="text-center p-8 text-gray-500">
+                  <td colSpan="7" className="text-center p-8 text-gray-500">
                     No items listed yet. Add your first item to get started!
                   </td>
                 </tr>
@@ -276,6 +288,7 @@ const SellerDashboard = () => {
                     </td>
                     <td className="p-4">{item.weight_kg}</td>
                     <td className="p-4">₹{item.price}</td>
+                    <td className="p-4">{Math.round(item.emissions_prevented)}</td>
                     <td className="p-4">{new Date(item.created_at).toLocaleDateString()}</td>
                     <td className="p-4">
                       <button 
@@ -293,10 +306,10 @@ const SellerDashboard = () => {
         </div>
       </div>
 
-      {/* Orders Section */}
-      <div className="bg-white rounded-lg shadow">
+      {/* Pending Orders Section */}
+      <div className="bg-white rounded-lg shadow mb-8">
         <div className="p-6 border-b">
-          <h2 className="text-xl font-semibold">Order Management</h2>
+          <h2 className="text-xl font-semibold">Pending Orders</h2>
         </div>
         
         <div className="overflow-x-auto">
@@ -308,47 +321,90 @@ const SellerDashboard = () => {
                 <th className="text-left p-4 font-semibold">Buyer</th>
                 <th className="text-left p-4 font-semibold">Weight (kg)</th>
                 <th className="text-left p-4 font-semibold">Amount (₹)</th>
-                <th className="text-left p-4 font-semibold">CO₂ Saved (kg)</th>
-                <th className="text-left p-4 font-semibold">Status</th>
                 <th className="text-left p-4 font-semibold">Order Date</th>
                 <th className="text-left p-4 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {orders.length === 0 ? (
+              {pendingOrders.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="text-center p-8 text-gray-500">
-                    No orders yet. Your items will appear here when customers place orders.
+                  <td colSpan="7" className="text-center p-8 text-gray-500">
+                    No pending orders at the moment.
                   </td>
                 </tr>
               ) : (
-                orders.map((order) => (
+                pendingOrders.map((order) => (
                   <tr key={order.id} className="border-t hover:bg-gray-50">
                     <td className="p-4 font-mono text-sm">#{order.id}</td>
                     <td className="p-4">{order.item_name}</td>
                     <td className="p-4">{order.buyer_name}</td>
                     <td className="p-4">{order.weight_kg}</td>
                     <td className="p-4">₹{order.amount_paid}</td>
-                    <td className="p-4">{order.emissions_prevented_kg}</td>
+                    <td className="p-4">{new Date(order.created_at).toLocaleDateString()}</td>
+                    <td className="p-4">
+                      <div className="flex space-x-2">
+                        <button 
+                          onClick={() => handleUpdateOrderStatus(order.id, 'Accepted')}
+                          className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm"
+                        >
+                          Accept
+                        </button>
+                        <button 
+                          onClick={() => handleUpdateOrderStatus(order.id, 'Rejected')}
+                          className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Previous Orders Section */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="p-6 border-b">
+          <h2 className="text-xl font-semibold">Previous Orders</h2>
+        </div>
+        
+        <div className="overflow-x-auto">
+          <table className="min-w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left p-4 font-semibold">Order ID</th>
+                <th className="text-left p-4 font-semibold">Item</th>
+                <th className="text-left p-4 font-semibold">Buyer</th>
+                <th className="text-left p-4 font-semibold">Weight (kg)</th>
+                <th className="text-left p-4 font-semibold">Amount (₹)</th>
+                <th className="text-left p-4 font-semibold">Status</th>
+                <th className="text-left p-4 font-semibold">Order Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {previousOrders.length === 0 ? (
+                <tr>
+                  <td colSpan="7" className="text-center p-8 text-gray-500">
+                    No previous orders yet.
+                  </td>
+                </tr>
+              ) : (
+                previousOrders.map((order) => (
+                  <tr key={order.id} className="border-t hover:bg-gray-50">
+                    <td className="p-4 font-mono text-sm">#{order.id}</td>
+                    <td className="p-4">{order.item_name}</td>
+                    <td className="p-4">{order.buyer_name}</td>
+                    <td className="p-4">{order.weight_kg}</td>
+                    <td className="p-4">₹{order.amount_paid}</td>
                     <td className="p-4">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(order.status)}`}>
-                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                        {order.status}
                       </span>
                     </td>
                     <td className="p-4">{new Date(order.created_at).toLocaleDateString()}</td>
-                    <td className="p-4">
-                      {order.status === 'pending' && (
-                        <button 
-                          onClick={() => {
-                            setSelectedOrder(order);
-                            setShowOrderModal(true);
-                          }}
-                          className="text-blue-600 hover:text-blue-800 text-sm"
-                        >
-                          Manage
-                        </button>
-                      )}
-                    </td>
                   </tr>
                 ))
               )}
@@ -417,46 +473,6 @@ const SellerDashboard = () => {
                 onClick={handleAddItem}
               >
                 Add Item
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Order Management Modal */}
-      {showOrderModal && selectedOrder && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white p-6 rounded-xl w-full max-w-md">
-            <h2 className="text-lg font-semibold mb-4">Manage Order #{selectedOrder.id}</h2>
-            
-            <div className="mb-4">
-              <p><strong>Item:</strong> {selectedOrder.item_name}</p>
-              <p><strong>Buyer:</strong> {selectedOrder.buyer_name}</p>
-              <p><strong>Weight:</strong> {selectedOrder.weight_kg} kg</p>
-              <p><strong>Amount:</strong> ₹{selectedOrder.amount_paid}</p>
-            </div>
-            
-            <div className="flex justify-end space-x-3">
-              <button 
-                className="px-4 py-2 bg-gray-300 hover:bg-gray-400 rounded-lg" 
-                onClick={() => {
-                  setShowOrderModal(false);
-                  setSelectedOrder(null);
-                }}
-              >
-                Cancel
-              </button>
-              <button 
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg" 
-                onClick={() => handleUpdateOrderStatus(selectedOrder.id, 'cancelled')}
-              >
-                Cancel Order
-              </button>
-              <button 
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg" 
-                onClick={() => handleUpdateOrderStatus(selectedOrder.id, 'completed')}
-              >
-                Mark Complete
               </button>
             </div>
           </div>

@@ -35,11 +35,11 @@ const handleLogin = async (e) => {
         position: 'top-center',
       });
 
-      // Navigate based on user role
+      // Navigate based on user role to new dashboard routes
       if (data.user && data.user.role === 'Seller') {
-        navigate('/seller');
+        navigate('/dashboard/seller');
       } else if (data.user && data.user.role === 'Buyer') {
-        navigate('/buyer');
+        navigate('/dashboard/buyer');
       } else {
         // Default fallback if role is not specified or unknown
         navigate('/profile');

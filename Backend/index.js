@@ -36,7 +36,7 @@ app.use(express.json());
 initializeDatabase().catch(console.error);
 
 // Email transporter
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,

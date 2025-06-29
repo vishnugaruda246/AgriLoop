@@ -46,7 +46,7 @@ try {
     console.warn('⚠️ Email credentials not found in environment variables');
     console.warn('⚠️ Email verification will be skipped');
   } else {
-    transporter = nodemailer.createTransport({
+    transporter = nodemailer.createTransporter({
       service: 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
@@ -109,6 +109,74 @@ app.get('/api/debug/users', async (req, res) => {
   } catch (err) {
     console.error('Error fetching users:', err);
     res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// Leaderboard endpoint
+app.get('/api/leaderboard', authenticateToken, async (req, res) => {
+  try {
+    // Get top sellers by CO₂ prevented (from orders they've completed)
+    const topSellers = await allQuery(`
+      SELECT 
+        u.id,
+        u.username,
+        u.full_name,
+        u.city,
+        COALESCE(SUM(o.weight_kg * 0.85), 0) as total_co2_prevented,
+        COUNT(CASE WHEN o.status = 'Accepted' THEN 1 END) as completed_orders,
+        COALESCE(SUM(CASE WHEN o.status = 'Accepted' THEN o.amount_paid ELSE 0 END), 0) as total_revenue
+      FROM users u
+      LEFT JOIN orders o ON u.id = o.seller_id
+      WHERE u.role = 'Seller'
+      GROUP BY u.id, u.username, u.full_name, u.city
+      ORDER BY total_co2_prevented DESC
+      LIMIT 10
+    `);
+
+    // Get top buyers by CO₂ offset (from orders they've made)
+    const topBuyers = await allQuery(`
+      SELECT 
+        u.id,
+        u.username,
+        u.full_name,
+        u.city,
+        COALESCE(SUM(o.weight_kg * 0.85), 0) as total_co2_offset,
+        COUNT(CASE WHEN o.status = 'Accepted' THEN 1 END) as completed_purchases,
+        COALESCE(SUM(CASE WHEN o.status = 'Accepted' THEN o.amount_paid ELSE 0 END), 0) as total_spent
+      FROM users u
+      LEFT JOIN orders o ON u.id = o.buyer_id
+      WHERE u.role = 'Buyer'
+      GROUP BY u.id, u.username, u.full_name, u.city
+      ORDER BY total_co2_offset DESC
+      LIMIT 10
+    `);
+
+    // Get overall platform stats
+    const platformStats = await getQuery(`
+      SELECT 
+        COUNT(DISTINCT CASE WHEN u.role = 'Seller' THEN u.id END) as total_sellers,
+        COUNT(DISTINCT CASE WHEN u.role = 'Buyer' THEN u.id END) as total_buyers,
+        COALESCE(SUM(CASE WHEN o.status = 'Accepted' THEN o.weight_kg * 0.85 ELSE 0 END), 0) as total_co2_prevented,
+        COUNT(CASE WHEN o.status = 'Accepted' THEN 1 END) as total_completed_orders,
+        COALESCE(SUM(CASE WHEN o.status = 'Accepted' THEN o.amount_paid ELSE 0 END), 0) as total_transaction_value
+      FROM users u
+      LEFT JOIN orders o ON (u.id = o.seller_id OR u.id = o.buyer_id)
+    `);
+
+    res.json({
+      topSellers: topSellers || [],
+      topBuyers: topBuyers || [],
+      platformStats: platformStats || {
+        total_sellers: 0,
+        total_buyers: 0,
+        total_co2_prevented: 0,
+        total_completed_orders: 0,
+        total_transaction_value: 0
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching leaderboard data:', err);
+    res.status(500).json({ error: 'Failed to fetch leaderboard data' });
   }
 });
 
@@ -922,5 +990,6 @@ app.listen(port, () => {
   console.log(`🚀 AgriLoop backend running on port ${port}`);
   console.log(`🏥 Health check available at: http://localhost:${port}/api/health`);
   console.log(`🔍 Debug users endpoint: http://localhost:${port}/api/debug/users`);
+  console.log(`🏆 Leaderboard endpoint: http://localhost:${port}/api/leaderboard`);
   console.log('💾 Using SQLite database for all data storage');
 });

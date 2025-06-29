@@ -8,6 +8,7 @@ import Profile from './pages/Profile';
 import SellerDashboard from './pages/SellerDashboard';
 import BuyerDashboard from './pages/BuyerDashboard';
 import Marketplace from './pages/Marketplace';
+import Leaderboard from './pages/Leaderboard';
 import PrivateRoute from './lib/PrivateRoute';
 
 const App = () => {
@@ -27,6 +28,7 @@ const App = () => {
         <Route path="/dashboard/seller" element={<SellerDashboard/>} />
         <Route path="/dashboard/buyer" element={<BuyerDashboard/>} />
         <Route path="/marketplace" element={<Marketplace/>} />
+        <Route path="/leaderboard" element={<Leaderboard/>} />
         {/* Legacy routes for backward compatibility */}
         <Route path="/seller" element={<SellerDashboard/>} />
         <Route path="/buyer" element={<BuyerDashboard/>} />

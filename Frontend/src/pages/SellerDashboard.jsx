@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
+import { Trophy } from 'lucide-react';
 
 const SellerDashboard = () => {
   const [kpis, setKpis] = useState({
@@ -208,6 +209,13 @@ const SellerDashboard = () => {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-green-700">AgriLoop Seller Dashboard</h1>
         <div className="flex space-x-3">
+          <button 
+            onClick={() => navigate('/leaderboard')} 
+            className="text-sm text-white bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded-lg flex items-center"
+          >
+            <Trophy className="h-4 w-4 mr-2" />
+            Leaderboard
+          </button>
           <button 
             onClick={() => navigate('/profile')} 
             className="text-sm text-white bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"

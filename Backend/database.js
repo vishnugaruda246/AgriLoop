@@ -9,11 +9,22 @@ const __dirname = dirname(__filename);
 const dbPath = join(__dirname, 'agri.db');
 console.log('SQLite database path:', dbPath);
 
+// Enable verbose mode for better debugging
+sqlite3.verbose();
+
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error('Error opening database:', err.message);
   } else {
     console.log('Connected to SQLite database successfully');
+    // Enable foreign keys
+    db.run('PRAGMA foreign_keys = ON', (err) => {
+      if (err) {
+        console.error('Error enabling foreign keys:', err);
+      } else {
+        console.log('Foreign keys enabled');
+      }
+    });
   }
 });
 
@@ -33,7 +44,7 @@ const initializeDatabase = () => {
           city VARCHAR(100),
           role VARCHAR(20) CHECK(role IN ('Seller', 'Buyer')) NOT NULL,
           password_hash TEXT NOT NULL,
-          verified BOOLEAN DEFAULT FALSE,
+          verified BOOLEAN DEFAULT 0,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `, (err) => {
@@ -56,7 +67,7 @@ const initializeDatabase = () => {
           price REAL NOT NULL,
           emissions_prevented REAL NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (seller_id) REFERENCES users (id)
+          FOREIGN KEY (seller_id) REFERENCES users (id) ON DELETE CASCADE
         )
       `, (err) => {
         if (err) {
@@ -78,9 +89,9 @@ const initializeDatabase = () => {
           weight_kg REAL NOT NULL,
           status TEXT CHECK(status IN ('Pending', 'Accepted', 'Rejected')) DEFAULT 'Pending',
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (item_id) REFERENCES items (id),
-          FOREIGN KEY (buyer_id) REFERENCES users (id),
-          FOREIGN KEY (seller_id) REFERENCES users (id)
+          FOREIGN KEY (item_id) REFERENCES items (id) ON DELETE CASCADE,
+          FOREIGN KEY (buyer_id) REFERENCES users (id) ON DELETE CASCADE,
+          FOREIGN KEY (seller_id) REFERENCES users (id) ON DELETE CASCADE
         )
       `, (err) => {
         if (err) {
@@ -101,6 +112,7 @@ const runQuery = (query, params = []) => {
   return new Promise((resolve, reject) => {
     db.run(query, params, function(err) {
       if (err) {
+        console.error('Database error in runQuery:', err);
         reject(err);
       } else {
         resolve({ id: this.lastID, changes: this.changes });
@@ -114,6 +126,7 @@ const getQuery = (query, params = []) => {
   return new Promise((resolve, reject) => {
     db.get(query, params, (err, row) => {
       if (err) {
+        console.error('Database error in getQuery:', err);
         reject(err);
       } else {
         resolve(row);
@@ -127,6 +140,7 @@ const allQuery = (query, params = []) => {
   return new Promise((resolve, reject) => {
     db.all(query, params, (err, rows) => {
       if (err) {
+        console.error('Database error in allQuery:', err);
         reject(err);
       } else {
         resolve(rows);
@@ -137,6 +151,19 @@ const allQuery = (query, params = []) => {
 
 // Graceful shutdown
 process.on('SIGINT', () => {
+  console.log('Shutting down gracefully...');
+  db.close((err) => {
+    if (err) {
+      console.error('Error closing database:', err.message);
+    } else {
+      console.log('Database connection closed.');
+    }
+    process.exit(0);
+  });
+});
+
+process.on('SIGTERM', () => {
+  console.log('Shutting down gracefully...');
   db.close((err) => {
     if (err) {
       console.error('Error closing database:', err.message);

@@ -28,21 +28,27 @@ app.use(express.json());
 // Initialize SQLite database with error handling
 initializeDatabase()
   .then(() => {
-    console.log('Database initialization completed successfully');
+    console.log('✅ Database initialization completed successfully');
   })
   .catch((error) => {
-    console.error('Database initialization failed:', error);
+    console.error('❌ Database initialization failed:', error);
     process.exit(1);
   });
 
-// Email transporter
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+// Email transporter configuration
+let transporter;
+try {
+  transporter = nodemailer.createTransporter({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+  console.log('✅ Email transporter configured successfully');
+} catch (error) {
+  console.error('❌ Email transporter configuration failed:', error);
+}
 
 // Authentication middleware
 const authenticateToken = (req, res, next) => {
@@ -66,13 +72,16 @@ const authenticateToken = (req, res, next) => {
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'AgriLoop Backend is running',
-    timestamp: new Date().toISOString()
+    message: 'AgriLoop Backend is running with SQLite',
+    timestamp: new Date().toISOString(),
+    database: 'SQLite'
   });
 });
 
 // Signup with email verification
 app.post('/api/signup', async (req, res) => {
+  console.log('📝 Signup request received:', { ...req.body, password: '[HIDDEN]' });
+  
   const { 
     username, 
     full_name, 
@@ -86,6 +95,7 @@ app.post('/api/signup', async (req, res) => {
 
   // Validate required fields
   if (!username || !full_name || !email || !role || !password) {
+    console.log('❌ Missing required fields');
     return res.status(400).json({ 
       error: 'Missing required fields: username, full_name, email, role, and password are required' 
     });
@@ -93,6 +103,7 @@ app.post('/api/signup', async (req, res) => {
 
   // Validate role
   if (!['Seller', 'Buyer'].includes(role)) {
+    console.log('❌ Invalid role:', role);
     return res.status(400).json({ 
       error: 'Role must be either "Seller" or "Buyer"' 
     });
@@ -100,12 +111,15 @@ app.post('/api/signup', async (req, res) => {
 
   // Validate gender if provided
   if (gender && !['Male', 'Female', 'Other'].includes(gender)) {
+    console.log('❌ Invalid gender:', gender);
     return res.status(400).json({ 
       error: 'Gender must be "Male", "Female", or "Other"' 
     });
   }
 
   try {
+    console.log('🔍 Checking if user already exists...');
+    
     // Check if user already exists
     const existingUser = await getQuery(
       'SELECT id FROM users WHERE email = ? OR username = ?',
@@ -113,14 +127,19 @@ app.post('/api/signup', async (req, res) => {
     );
 
     if (existingUser) {
+      console.log('❌ User already exists');
       return res.status(409).json({ error: 'Email or username already exists' });
     }
 
+    console.log('🔐 Hashing password...');
     const hashedPassword = await bcrypt.hash(password, 10);
-    const token = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    
+    console.log('🎫 Generating verification token...');
+    const token = jwt.sign({ email }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '1d' });
 
+    console.log('💾 Inserting user into database...');
     // Insert user with all fields
-    await runQuery(
+    const result = await runQuery(
       `INSERT INTO users (username, full_name, email, gender, date_of_birth, city, role, password_hash, verified) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -136,32 +155,47 @@ app.post('/api/signup', async (req, res) => {
       ]
     );
 
-    const verificationLink = `http://localhost:3000/api/verify-email?token=${token}`;
+    console.log('✅ User created with ID:', result.id);
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: 'Verify your email - AgriLoop',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2>Welcome to AgriLoop, ${full_name}!</h2>
-          <p>Thank you for signing up. Please verify your email address to complete your registration.</p>
-          <p>
-            <a href="${verificationLink}" 
-               style="background-color: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">
-              Verify Email Address
-            </a>
-          </p>
-          <p>If the button doesn't work, you can also click this link:</p>
-          <p><a href="${verificationLink}">${verificationLink}</a></p>
-          <p>If you didn't create this account, please ignore this email.</p>
-        </div>
-      `
-    });
+    // Send verification email if transporter is available
+    if (transporter) {
+      try {
+        console.log('📧 Sending verification email...');
+        const verificationLink = `http://localhost:3000/api/verify-email?token=${token}`;
+
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: email,
+          subject: 'Verify your email - AgriLoop',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2>Welcome to AgriLoop, ${full_name}!</h2>
+              <p>Thank you for signing up. Please verify your email address to complete your registration.</p>
+              <p>
+                <a href="${verificationLink}" 
+                   style="background-color: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">
+                  Verify Email Address
+                </a>
+              </p>
+              <p>If the button doesn't work, you can also click this link:</p>
+              <p><a href="${verificationLink}">${verificationLink}</a></p>
+              <p>If you didn't create this account, please ignore this email.</p>
+            </div>
+          `
+        });
+        console.log('✅ Verification email sent successfully');
+      } catch (emailError) {
+        console.error('❌ Failed to send verification email:', emailError);
+        // Don't fail the signup if email fails
+      }
+    } else {
+      console.log('⚠️ Email transporter not available, skipping email verification');
+    }
 
     res.status(200).json({ 
       message: 'Signup successful. Check your email to verify your account.',
       user: {
+        id: result.id,
         username,
         full_name,
         email,
@@ -170,7 +204,7 @@ app.post('/api/signup', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Signup error:', err);
+    console.error('❌ Signup error:', err);
     res.status(500).json({ error: 'Error during signup. Please try again.' });
   }
 });
@@ -241,7 +275,7 @@ app.get('/api/verify-email', async (req, res) => {
 
   try {
     // Decode token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
     const userEmail = decoded.email;
 
     // Check if user exists
@@ -308,7 +342,7 @@ app.get('/api/verify-email', async (req, res) => {
     }
 
     // Update verified status
-    await runQuery('UPDATE users SET verified = ? WHERE email = ?', [true, userEmail]);
+    await runQuery('UPDATE users SET verified = ? WHERE email = ?', [1, userEmail]);
 
     // Return success HTML page
     return res.status(200).send(`
@@ -480,28 +514,34 @@ app.get('/api/verify-email', async (req, res) => {
 // Login endpoint
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
+  console.log('🔐 Login attempt for:', email);
 
   try {
     // 1. Check if user exists
     const user = await getQuery('SELECT * FROM users WHERE email = ?', [email]);
     
     if (!user) {
+      console.log('❌ User not found:', email);
       return res.status(404).json({ message: 'User not found.' });
     }
 
     // 2. Check if email is verified
     if (!user.verified) {
+      console.log('❌ Email not verified for:', email);
       return res.status(403).json({ message: 'Email not verified. Please verify your email to log in.' });
     }
 
     // 3. Compare password
     const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
+      console.log('❌ Incorrect password for:', email);
       return res.status(401).json({ message: 'Incorrect password.' });
     }
 
     // 4. Generate token
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '7d' });
+
+    console.log('✅ Login successful for:', email);
 
     // 5. Respond with token and user info
     res.json({
@@ -516,7 +556,7 @@ app.post('/api/login', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Login Error:', err);
+    console.error('❌ Login Error:', err);
     res.status(500).json({ message: 'Server error during login.' });
   }
 });
@@ -529,7 +569,7 @@ app.get('/api/profile', async (req, res) => {
   const token = authHeader.split(' ')[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
     const user = await getQuery(
       'SELECT username, full_name, email, gender, date_of_birth, city, role FROM users WHERE id = ?', 
       [decoded.userId]
@@ -808,7 +848,7 @@ app.use((err, req, res, next) => {
 
 // Start server
 app.listen(port, () => {
-  console.log(`AgriLoop backend running on port ${port}`);
-  console.log(`Health check available at: http://localhost:${port}/api/health`);
-  console.log('Using SQLite database for all data storage');
+  console.log(`🚀 AgriLoop backend running on port ${port}`);
+  console.log(`🏥 Health check available at: http://localhost:${port}/api/health`);
+  console.log('💾 Using SQLite database for all data storage');
 });

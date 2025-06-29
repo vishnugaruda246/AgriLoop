@@ -9,7 +9,7 @@ const Profile = () => {
   const navigate = useNavigate();
 
   // Payment QR code image URL - you can replace this with your actual QR code image
-  const paymentQRCodeURL = "https://images.pexels.com/photos/8867482/pexels-photo-8867482.jpeg?auto=compress&cs=tinysrgb&w=800";
+  const paymentQRCodeURL = "https://drive.google.com/file/d/1xlmot2btBO8e4IYrQq4PnJlBoK-ObP26/view?usp=drivesdk";
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);

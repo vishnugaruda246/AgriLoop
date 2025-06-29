@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Mail, MapPin, Calendar, UserCheck } from 'lucide-react';
+import { User, Mail, MapPin, Calendar, UserCheck, QrCode } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
 const Profile = () => {
@@ -8,18 +8,26 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
+  // Payment QR code image URL - you can replace this with your actual QR code image
+  const paymentQRCodeURL = "https://images.pexels.com/photos/8867482/pexels-photo-8867482.jpeg?auto=compress&cs=tinysrgb&w=800";
+
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   };
 
-const handleLogout = () => {
-  // Clear all stored data from localStorage
-  localStorage.clear();
+  const handleLogout = () => {
+    // Clear all stored data from localStorage
+    localStorage.clear();
 
-  // Redirect to login page
-  navigate('/login');
-};
+    // Redirect to login page
+    navigate('/login');
+  };
+
+  const handlePaymentQRCode = () => {
+    // Open QR code image in a new tab
+    window.open(paymentQRCodeURL, '_blank');
+  };
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -98,27 +106,38 @@ const handleLogout = () => {
             </div>
           </div>
 
-          <div className="px-6 pb-6">
+          <div className="px-6 pb-6 space-y-3">
             <button onClick={() => {
-      const role = localStorage.getItem('userRole');
-      if (role === 'Seller') {
-        navigate('/dashboard/seller');
-      } else if (role === 'Buyer') {
-        navigate('/dashboard/buyer');
-      } else {
-        toast.error('User role not found. Please login again.');
-        navigate('/login');
-      }
-    }} className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-semibold py-3 px-4 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-md hover:shadow-lg">
+              const role = localStorage.getItem('userRole');
+              if (role === 'Seller') {
+                navigate('/dashboard/seller');
+              } else if (role === 'Buyer') {
+                navigate('/dashboard/buyer');
+              } else {
+                toast.error('User role not found. Please login again.');
+                navigate('/login');
+              }
+            }} className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-semibold py-3 px-4 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-md hover:shadow-lg">
               Go to Dashboard
             </button>
-<button
-  onClick={handleLogout}
-  className="w-full my-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-md hover:shadow-lg"
->
-  Logout
-</button>
 
+            {/* Payment QR Code Button - Only show for Sellers */}
+            {profileData.role === 'Seller' && (
+              <button
+                onClick={handlePaymentQRCode}
+                className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold py-3 px-4 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-md hover:shadow-lg flex items-center justify-center"
+              >
+                <QrCode className="w-5 h-5 mr-2" />
+                Payment QR Code
+              </button>
+            )}
+
+            <button
+              onClick={handleLogout}
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-md hover:shadow-lg"
+            >
+              Logout
+            </button>
           </div>
         </div>
 
